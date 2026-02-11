@@ -2,6 +2,8 @@ from datetime import date
 
 from google.adk.agents.llm_agent import Agent
 
+from .tools import provide_quick_fix, schedule_repair
+
 SYSTEM_INSTRUCTION = f"""
 오늘 날짜: {date.today().isoformat()}
 
@@ -113,13 +115,13 @@ SYSTEM_INSTRUCTION = f"""
 
 ### schedule_repair
 - 용도: 수리 일정 예약
-- 파라미터: request_details (딕셔너리)
-  - 필수 키:
-    - "name": 임차인 이름 (예: "김민수")
-    - "address": 주소 (예: "서울시 강남구 테헤란로 123 래미안아파트 101동 202호")
-    - "preferred_datetime": 희망 방문 일시 (예: "2026-02-12 오후")
-    - "issue_type": 고정값 "sink_leak"
-    - "issue_description": 대화에서 파악된 정보 조합 - "[위치] [증상]" 형식 (예: "싱크대 아래 배관 연결부 뚝뚝 누수")
+- 파라미터:
+  - name: 임차인 이름 (예: "김민수")
+  - address: 주소 (예: "서울시 강남구 테헤란로 123 래미안아파트 101동 202호")
+  - preferred_datetime: 희망 방문 일시 (예: "2026-02-12 오후")
+  - issue_type: 고정값 "sink_leak"
+  - issue_description: 대화에서 파악된 정보 조합 - "[위치] [증상]" 형식 (예: "싱크대 아래 배관 연결부 뚝뚝 누수")
+- 예시: schedule_repair(name="김민수", address="서울시 강남구 테헤란로 123 래미안아파트 101동 202호", preferred_datetime="2026-02-12 오후", issue_type="sink_leak", issue_description="싱크대 아래 배관 연결부 뚝뚝 누수")
 - 호출 조건: name, address, preferred_datetime 모두 확인되고, 임차인이 "네", "부탁드려요" 등으로 확인한 후에만 호출합니다. 확인 없이 바로 호출하지 않습니다.
 
 ## 툴 반환값 처리
@@ -193,7 +195,7 @@ SYSTEM_INSTRUCTION = f"""
 비서: 확인하겠습니다. 김민수님, 서울시 강남구 테헤란로 123 래미안아파트 101동 202호, 내일(2월 12일) 오후로 수리 예약을 진행할까요?
 
 임차인: 네 부탁드려요.
-[schedule_repair(request_details={{"name": "김민수", "address": "서울시 강남구 테헤란로 123 래미안아파트 101동 202호", "preferred_datetime": "2026-02-12 오후", "issue_type": "sink_leak", "issue_description": "싱크대 아래 배관 연결부 뚝뚝 누수"}}) 호출 → 반환값: {{"status": "scheduled", "appointment_datetime": "2026-02-12 오후 3시"}}]
+[schedule_repair(name="김민수", address="서울시 강남구 테헤란로 123 래미안아파트 101동 202호", preferred_datetime="2026-02-12 오후", issue_type="sink_leak", issue_description="싱크대 아래 배관 연결부 뚝뚝 누수") 호출 → 반환값: {{"status": "scheduled", "appointment_datetime": "2026-02-12 오후 3시"}}]
 비서: 수리 예약이 완료되었습니다.
 
 **예약 확인**
@@ -211,4 +213,5 @@ root_agent = Agent(
     name="root_agent",
     description="KindredPM 스마트 유지보수 비서. 임차인의 시설 문제 신고를 접수하고, 응급조치를 안내하며, 수리 일정을 예약합니다.",
     instruction=SYSTEM_INSTRUCTION,
+    tools=[provide_quick_fix, schedule_repair],
 )
