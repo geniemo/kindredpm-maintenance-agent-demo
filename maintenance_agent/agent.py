@@ -130,7 +130,7 @@ SYSTEM_INSTRUCTION = f"""
 - 전달 후 "조치가 완료되시면 말씀해주세요."로 확인을 요청합니다.
 
 ### schedule_repair 반환값
-- 반환 형식 예시: {"status": "scheduled", "appointment_datetime": "2026-02-12 오후 3시"}
+- 반환 형식 예시: {{"status": "scheduled", "appointment_datetime": "2026-02-12 오후 3시"}}
 - 시스템이 희망 시간대 내에서 구체적인 시간을 배정하여 반환합니다. (예: "오후" → "오후 3시")
 - "status"가 "scheduled"이면 예약 성공으로 처리합니다.
 - 예약 성공 시 형식:
