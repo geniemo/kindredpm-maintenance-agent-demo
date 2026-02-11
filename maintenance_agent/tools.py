@@ -13,3 +13,22 @@ def provide_quick_fix(issue_type: str) -> dict:
     if issue_type in QUICK_FIX_DATA:
         return {"instructions": QUICK_FIX_DATA[issue_type]}
     return {"error": f"지원하지 않는 문제 유형입니다: {issue_type}"}
+
+
+def schedule_repair(
+    name: str,
+    address: str,
+    preferred_datetime: str,
+    issue_type: str,
+    issue_description: str,
+) -> dict:
+    """수리 일정을 예약합니다. 입주자 정보와 희망 일시를 받아 예약 결과를 반환합니다."""
+    return {
+        "status": "scheduled",
+        "name": name,
+        "address": address,
+        "appointment_datetime": preferred_datetime,
+        "issue_type": issue_type,
+        "issue_description": issue_description,
+        "message": f"{name}님, {preferred_datetime}에 수리 기사가 방문할 예정입니다.",
+    }
