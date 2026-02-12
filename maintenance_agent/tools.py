@@ -3,6 +3,7 @@ from .db import (
     create_repair,
     generate_ticket_id,
     get_available_slots,
+    get_repair,
     init_db,
 )
 
@@ -91,4 +92,12 @@ def schedule_repair(
     repair["message"] = (
         f"{name}님, {date} {time_slot}에 수리 기사가 방문할 예정입니다. 티켓 번호: {ticket_id}"
     )
+    return repair
+
+
+def check_repair_status(ticket_id: str) -> dict:
+    """티켓 번호로 수리 예약 상태를 조회합니다."""
+    repair = get_repair(ticket_id)
+    if not repair:
+        return {"error": f"티켓 번호 {ticket_id}에 해당하는 예약을 찾을 수 없습니다."}
     return repair
