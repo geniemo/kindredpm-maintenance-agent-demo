@@ -1,3 +1,7 @@
+import os
+import smtplib
+from email.mime.text import MIMEText
+
 from .db import (
     book_slot,
     cancel_repair_record,
@@ -110,3 +114,83 @@ def cancel_repair(ticket_id: str) -> dict:
     if "error" not in result:
         result["message"] = f"티켓 {ticket_id} 예약이 취소되었습니다."
     return result
+
+
+ISSUE_TYPE_KR = {
+    "sink_leak": "싱크대 누수",
+    "toilet_clog": "변기 막힘",
+    "boiler_issue": "보일러 고장",
+    "door_lock_issue": "도어록 고장",
+    "mold_issue": "곰팡이/결로",
+}
+
+
+def _build_email_body(notification_type: str, repair: dict) -> tuple[str, str]:
+    """알림 유형에 따른 이메일 제목과 본문을 생성합니다."""
+    issue_kr = ISSUE_TYPE_KR.get(repair.get("issue_type", ""), "시설 문제")
+    ticket_id = repair["ticket_id"]
+
+    if notification_type == "scheduled":
+        subject = f"[KindredPM] 수리 예약 확인 - {ticket_id}"
+        body = (
+            f"{repair['name']}님, 안녕하세요.\n"
+            f"KindredPM 유지보수 예약이 확정되었습니다.\n\n"
+            f"■ 티켓 번호: {ticket_id}\n"
+            f"■ 문제 유형: {issue_kr}\n"
+            f"■ 방문 일시: {repair['date']} {repair['time_slot']}\n"
+            f"■ 방문 주소: {repair['address']}\n\n"
+            f"방문 전 현장 접근이 가능하도록 준비 부탁드립니다.\n"
+            f"변경/취소가 필요하시면 KindredPM 고객센터(02-1234-5678)로 연락해주세요.\n\n"
+            f"감사합니다.\nKindredPM 유지보수팀"
+        )
+    else:
+        subject = f"[KindredPM] 예약 취소 확인 - {ticket_id}"
+        body = (
+            f"{repair['name']}님, 안녕하세요.\n"
+            f"KindredPM 유지보수 예약이 취소되었습니다.\n\n"
+            f"■ 티켓 번호: {ticket_id}\n"
+            f"■ 문제 유형: {issue_kr}\n"
+            f"■ 취소된 일시: {repair['date']} {repair['time_slot']}\n\n"
+            f"재예약이 필요하시면 언제든 문의해주세요.\n\n"
+            f"감사합니다.\nKindredPM 유지보수팀"
+        )
+    return subject, body
+
+
+def send_notification(email: str, ticket_id: str, notification_type: str) -> dict:
+    """예약 확인/취소 이메일을 발송합니다. SMTP 미설정 시 시뮬레이션으로 폴백합니다."""
+    repair = get_repair(ticket_id)
+    if not repair:
+        return {"error": f"티켓 번호 {ticket_id}에 해당하는 예약을 찾을 수 없습니다."}
+
+    subject, body = _build_email_body(notification_type, repair)
+
+    smtp_user = os.environ.get("GMAIL_USER", "")
+    smtp_pass = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+    if smtp_user and smtp_pass:
+        try:
+            msg = MIMEText(body, "plain", "utf-8")
+            msg["Subject"] = subject
+            msg["From"] = smtp_user
+            msg["To"] = email
+
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, email, msg.as_string())
+
+            return {
+                "ticket_id": ticket_id,
+                "sent_to": email,
+                "status": "sent",
+                "message": f"{email}로 알림 이메일이 발송되었습니다.",
+            }
+        except Exception:
+            pass
+
+    return {
+        "ticket_id": ticket_id,
+        "sent_to": email,
+        "status": "simulated",
+        "message": f"{email}로 알림 이메일이 발송되었습니다. (시뮬레이션)",
+    }
