@@ -1,3 +1,7 @@
+from .db import get_available_slots, init_db
+
+init_db()
+
 QUICK_FIX_DATA = {
     "sink_leak": (
         "1. 싱크대 아래쪽에 있는 지수밸브(수도 잠금 장치)를 시계 방향으로 돌려서 잠가주세요.\n"
@@ -40,6 +44,18 @@ def provide_quick_fix(issue_type: str) -> dict:
     if issue_type in QUICK_FIX_DATA:
         return {"instructions": QUICK_FIX_DATA[issue_type]}
     return {"error": f"지원하지 않는 문제 유형입니다: {issue_type}"}
+
+
+def check_available_slots(date: str, issue_type: str) -> dict:
+    """특정 날짜의 예약 가능한 시간대를 조회합니다."""
+    slots = get_available_slots(date)
+    if not slots:
+        return {
+            "date": date,
+            "available_slots": [],
+            "message": f"{date}에는 예약 가능한 시간대가 없습니다.",
+        }
+    return {"date": date, "available_slots": slots}
 
 
 def schedule_repair(
