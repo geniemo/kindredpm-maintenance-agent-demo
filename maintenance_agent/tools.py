@@ -1,3 +1,19 @@
+import os
+import smtplib
+from email.mime.text import MIMEText
+
+from .db import (
+    book_slot,
+    cancel_repair_record,
+    create_repair,
+    generate_ticket_id,
+    get_available_slots,
+    get_repair,
+    init_db,
+)
+
+init_db()
+
 QUICK_FIX_DATA = {
     "sink_leak": (
         "1. 싱크대 아래쪽에 있는 지수밸브(수도 잠금 장치)를 시계 방향으로 돌려서 잠가주세요.\n"
@@ -38,24 +54,146 @@ QUICK_FIX_DATA = {
 def provide_quick_fix(issue_type: str) -> dict:
     """응급조치 방법을 안내합니다. issue_type에 해당하는 응급조치 절차를 반환합니다."""
     if issue_type in QUICK_FIX_DATA:
-        return {"instructions": QUICK_FIX_DATA[issue_type]}
+        return {
+            "instructions": QUICK_FIX_DATA[issue_type],
+            "guide": "위 응급조치를 모든 단계 빠짐없이 번호 목록으로 안내하세요.",
+        }
     return {"error": f"지원하지 않는 문제 유형입니다: {issue_type}"}
+
+
+def check_available_slots(date: str, issue_type: str) -> dict:
+    """특정 날짜의 예약 가능한 시간대를 조회합니다."""
+    slots = get_available_slots(date)
+    if not slots:
+        return {
+            "date": date,
+            "available_slots": [],
+            "message": f"{date}에는 예약 가능한 시간대가 없습니다.",
+        }
+    return {"date": date, "available_slots": slots}
 
 
 def schedule_repair(
     name: str,
     address: str,
-    preferred_datetime: str,
+    date: str,
+    time_slot: str,
     issue_type: str,
     issue_description: str,
+    email: str,
 ) -> dict:
-    """수리 일정을 예약합니다. 입주자 정보와 희망 일시를 받아 예약 결과를 반환합니다."""
+    """수리 일정을 예약합니다. 빈 시간대 검증 후 예약을 생성하고 티켓 번호를 발행합니다."""
+    if not book_slot(date, time_slot):
+        return {"error": f"{date} {time_slot}은(는) 이미 예약된 시간대입니다."}
+
+    ticket_id = generate_ticket_id(date)
+    repair = create_repair(
+        ticket_id=ticket_id,
+        name=name,
+        address=address,
+        target_date=date,
+        time_slot=time_slot,
+        issue_type=issue_type,
+        issue_description=issue_description,
+        email=email,
+    )
+    repair["message"] = (
+        f"{name}님, {date} {time_slot}에 수리 기사가 방문할 예정입니다. 티켓 번호: {ticket_id}"
+    )
+    return repair
+
+
+def check_repair_status(ticket_id: str) -> dict:
+    """티켓 번호로 수리 예약 상태를 조회합니다."""
+    repair = get_repair(ticket_id)
+    if not repair:
+        return {"error": f"티켓 번호 {ticket_id}에 해당하는 예약을 찾을 수 없습니다."}
+    return repair
+
+
+def cancel_repair(ticket_id: str) -> dict:
+    """예약을 취소합니다. 티켓 번호로 예약을 찾아 취소하고 해당 시간대를 복구합니다."""
+    result = cancel_repair_record(ticket_id)
+    if "error" not in result:
+        result["message"] = f"티켓 {ticket_id} 예약이 취소되었습니다."
+    return result
+
+
+ISSUE_TYPE_KR = {
+    "sink_leak": "싱크대 누수",
+    "toilet_clog": "변기 막힘",
+    "boiler_issue": "보일러 고장",
+    "door_lock_issue": "도어록 고장",
+    "mold_issue": "곰팡이/결로",
+}
+
+
+def _build_email_body(notification_type: str, repair: dict) -> tuple[str, str]:
+    """알림 유형에 따른 이메일 제목과 본문을 생성합니다."""
+    issue_kr = ISSUE_TYPE_KR.get(repair.get("issue_type", ""), "시설 문제")
+    ticket_id = repair["ticket_id"]
+
+    if notification_type == "scheduled":
+        subject = f"[KindredPM] 수리 예약 확인 - {ticket_id}"
+        body = (
+            f"{repair['name']}님, 안녕하세요.\n"
+            f"KindredPM 유지보수 예약이 확정되었습니다.\n\n"
+            f"■ 티켓 번호: {ticket_id}\n"
+            f"■ 문제 유형: {issue_kr}\n"
+            f"■ 방문 일시: {repair['date']} {repair['time_slot']}\n"
+            f"■ 방문 주소: {repair['address']}\n\n"
+            f"방문 전 현장 접근이 가능하도록 준비 부탁드립니다.\n"
+            f"변경/취소가 필요하시면 KindredPM 고객센터(02-1234-5678)로 연락해주세요.\n\n"
+            f"감사합니다.\nKindredPM 유지보수팀"
+        )
+    else:
+        subject = f"[KindredPM] 예약 취소 확인 - {ticket_id}"
+        body = (
+            f"{repair['name']}님, 안녕하세요.\n"
+            f"KindredPM 유지보수 예약이 취소되었습니다.\n\n"
+            f"■ 티켓 번호: {ticket_id}\n"
+            f"■ 문제 유형: {issue_kr}\n"
+            f"■ 취소된 일시: {repair['date']} {repair['time_slot']}\n\n"
+            f"재예약이 필요하시면 언제든 문의해주세요.\n\n"
+            f"감사합니다.\nKindredPM 유지보수팀"
+        )
+    return subject, body
+
+
+def send_notification(email: str, ticket_id: str, notification_type: str) -> dict:
+    """예약 확인/취소 이메일을 발송합니다. SMTP 미설정 시 시뮬레이션으로 폴백합니다."""
+    repair = get_repair(ticket_id)
+    if not repair:
+        return {"error": f"티켓 번호 {ticket_id}에 해당하는 예약을 찾을 수 없습니다."}
+
+    subject, body = _build_email_body(notification_type, repair)
+
+    smtp_user = os.environ.get("GMAIL_USER", "")
+    smtp_pass = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+    if smtp_user and smtp_pass:
+        try:
+            msg = MIMEText(body, "plain", "utf-8")
+            msg["Subject"] = subject
+            msg["From"] = smtp_user
+            msg["To"] = email
+
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, email, msg.as_string())
+
+            return {
+                "ticket_id": ticket_id,
+                "sent_to": email,
+                "status": "sent",
+                "message": f"{email}로 알림 이메일이 발송되었습니다.",
+            }
+        except Exception:
+            pass
+
     return {
-        "status": "scheduled",
-        "name": name,
-        "address": address,
-        "appointment_datetime": preferred_datetime,
-        "issue_type": issue_type,
-        "issue_description": issue_description,
-        "message": f"{name}님, {preferred_datetime}에 수리 기사가 방문할 예정입니다.",
+        "ticket_id": ticket_id,
+        "sent_to": email,
+        "status": "simulated",
+        "message": f"{email}로 알림 이메일이 발송되었습니다. (시뮬레이션)",
     }
