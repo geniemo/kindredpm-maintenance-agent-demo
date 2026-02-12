@@ -1,5 +1,6 @@
 from .db import (
     book_slot,
+    cancel_repair_record,
     create_repair,
     generate_ticket_id,
     get_available_slots,
@@ -101,3 +102,11 @@ def check_repair_status(ticket_id: str) -> dict:
     if not repair:
         return {"error": f"티켓 번호 {ticket_id}에 해당하는 예약을 찾을 수 없습니다."}
     return repair
+
+
+def cancel_repair(ticket_id: str) -> dict:
+    """예약을 취소합니다. 티켓 번호로 예약을 찾아 취소하고 해당 시간대를 복구합니다."""
+    result = cancel_repair_record(ticket_id)
+    if "error" not in result:
+        result["message"] = f"티켓 {ticket_id} 예약이 취소되었습니다."
+    return result
