@@ -1,4 +1,10 @@
-from .db import get_available_slots, init_db
+from .db import (
+    book_slot,
+    create_repair,
+    generate_ticket_id,
+    get_available_slots,
+    init_db,
+)
 
 init_db()
 
@@ -61,17 +67,28 @@ def check_available_slots(date: str, issue_type: str) -> dict:
 def schedule_repair(
     name: str,
     address: str,
-    preferred_datetime: str,
+    date: str,
+    time_slot: str,
     issue_type: str,
     issue_description: str,
+    email: str = "",
 ) -> dict:
-    """수리 일정을 예약합니다. 입주자 정보와 희망 일시를 받아 예약 결과를 반환합니다."""
-    return {
-        "status": "scheduled",
-        "name": name,
-        "address": address,
-        "appointment_datetime": preferred_datetime,
-        "issue_type": issue_type,
-        "issue_description": issue_description,
-        "message": f"{name}님, {preferred_datetime}에 수리 기사가 방문할 예정입니다.",
-    }
+    """수리 일정을 예약합니다. 빈 시간대 검증 후 예약을 생성하고 티켓 번호를 발행합니다."""
+    if not book_slot(date, time_slot):
+        return {"error": f"{date} {time_slot}은(는) 이미 예약된 시간대입니다."}
+
+    ticket_id = generate_ticket_id(date)
+    repair = create_repair(
+        ticket_id=ticket_id,
+        name=name,
+        address=address,
+        target_date=date,
+        time_slot=time_slot,
+        issue_type=issue_type,
+        issue_description=issue_description,
+        email=email or None,
+    )
+    repair["message"] = (
+        f"{name}님, {date} {time_slot}에 수리 기사가 방문할 예정입니다. 티켓 번호: {ticket_id}"
+    )
+    return repair
