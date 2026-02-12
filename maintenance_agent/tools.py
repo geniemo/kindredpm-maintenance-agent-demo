@@ -54,7 +54,10 @@ QUICK_FIX_DATA = {
 def provide_quick_fix(issue_type: str) -> dict:
     """응급조치 방법을 안내합니다. issue_type에 해당하는 응급조치 절차를 반환합니다."""
     if issue_type in QUICK_FIX_DATA:
-        return {"instructions": QUICK_FIX_DATA[issue_type]}
+        return {
+            "instructions": QUICK_FIX_DATA[issue_type],
+            "guide": "위 응급조치를 모든 단계 빠짐없이 번호 목록으로 안내하세요.",
+        }
     return {"error": f"지원하지 않는 문제 유형입니다: {issue_type}"}
 
 
@@ -77,7 +80,7 @@ def schedule_repair(
     time_slot: str,
     issue_type: str,
     issue_description: str,
-    email: str = "",
+    email: str,
 ) -> dict:
     """수리 일정을 예약합니다. 빈 시간대 검증 후 예약을 생성하고 티켓 번호를 발행합니다."""
     if not book_slot(date, time_slot):
@@ -92,7 +95,7 @@ def schedule_repair(
         time_slot=time_slot,
         issue_type=issue_type,
         issue_description=issue_description,
-        email=email or None,
+        email=email,
     )
     repair["message"] = (
         f"{name}님, {date} {time_slot}에 수리 기사가 방문할 예정입니다. 티켓 번호: {ticket_id}"
