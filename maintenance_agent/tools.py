@@ -97,9 +97,11 @@ def schedule_repair(
         issue_description=issue_description,
         email=email,
     )
+    notification = _send_notification(email, ticket_id, "scheduled")
     repair["message"] = (
         f"{name}님, {date} {time_slot}에 수리 기사가 방문할 예정입니다. 티켓 번호: {ticket_id}"
     )
+    repair["email_status"] = notification.get("status", "skipped")
     return repair
 
 
@@ -115,6 +117,10 @@ def cancel_repair(ticket_id: str) -> dict:
     """예약을 취소합니다. 티켓 번호로 예약을 찾아 취소하고 해당 시간대를 복구합니다."""
     result = cancel_repair_record(ticket_id)
     if "error" not in result:
+        email = result.get("email", "")
+        if email:
+            notification = _send_notification(email, ticket_id, "cancelled")
+            result["email_status"] = notification.get("status", "skipped")
         result["message"] = f"티켓 {ticket_id} 예약이 취소되었습니다."
     return result
 
@@ -160,11 +166,11 @@ def _build_email_body(notification_type: str, repair: dict) -> tuple[str, str]:
     return subject, body
 
 
-def send_notification(email: str, ticket_id: str, notification_type: str) -> dict:
+def _send_notification(email: str, ticket_id: str, notification_type: str) -> dict:
     """예약 확인/취소 이메일을 발송합니다. SMTP 미설정 시 시뮬레이션으로 폴백합니다."""
     repair = get_repair(ticket_id)
     if not repair:
-        return {"error": f"티켓 번호 {ticket_id}에 해당하는 예약을 찾을 수 없습니다."}
+        return {"status": "skipped"}
 
     subject, body = _build_email_body(notification_type, repair)
 
@@ -182,18 +188,8 @@ def send_notification(email: str, ticket_id: str, notification_type: str) -> dic
                 server.login(smtp_user, smtp_pass)
                 server.sendmail(smtp_user, email, msg.as_string())
 
-            return {
-                "ticket_id": ticket_id,
-                "sent_to": email,
-                "status": "sent",
-                "message": f"{email}로 알림 이메일이 발송되었습니다.",
-            }
+            return {"status": "sent", "sent_to": email}
         except Exception:
             pass
 
-    return {
-        "ticket_id": ticket_id,
-        "sent_to": email,
-        "status": "simulated",
-        "message": f"{email}로 알림 이메일이 발송되었습니다. (시뮬레이션)",
-    }
+    return {"status": "simulated", "sent_to": email}
