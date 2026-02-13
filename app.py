@@ -91,7 +91,27 @@ st.set_page_config(
 # --- 사이드바 ---
 with st.sidebar:
     st.title("KindredPM 유지보수 비서")
-    st.caption("시설 유지보수 문의를 도와드립니다.")
+    st.caption("AI 기반 시설 유지보수 자동화 데모")
+    st.divider()
+
+    st.subheader("지원 문제 유형")
+    st.markdown(
+        "- 싱크대 누수\n"
+        "- 변기 막힘\n"
+        "- 보일러 고장\n"
+        "- 도어록 고장\n"
+        "- 곰팡이/결로"
+    )
+
+    st.subheader("주요 기능")
+    st.markdown(
+        "- 문제 유형 자동 분류\n"
+        "- 유형별 응급조치 안내\n"
+        "- 수리 일정 예약/조회/취소\n"
+        "- 예약 확인 이메일 자동 발송\n"
+        "- AI 사고 과정 실시간 표시"
+    )
+
     st.divider()
     if st.button("대화 초기화", use_container_width=True):
         reset_database()
@@ -111,8 +131,31 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
+# --- 초기 안내 메시지 ---
+if not st.session_state.messages:
+    st.markdown(
+        "안녕하세요! **KindredPM 유지보수 비서**입니다.\n\n"
+        "시설 문제 신고, 응급조치 안내, 수리 예약까지 도와드립니다.\n"
+        "아래 예시를 클릭하거나 직접 입력해주세요."
+    )
+    examples = [
+        "싱크대에서 물이 새요",
+        "변기가 막혔어요",
+        "보일러가 안 켜져요",
+        "도어록이 고장났어요",
+        "벽에 곰팡이가 생겼어요",
+    ]
+    cols = st.columns(3)
+    for i, example in enumerate(examples):
+        if cols[i % 3].button(example, use_container_width=True):
+            st.session_state.pending_prompt = example
+            st.rerun()
+
 # --- 사용자 입력 처리 (스트리밍) ---
-if prompt := st.chat_input("메시지를 입력하세요"):
+prompt = st.chat_input("메시지를 입력하세요") or st.session_state.pop(
+    "pending_prompt", None
+)
+if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
@@ -134,6 +177,8 @@ if prompt := st.chat_input("메시지를 입력하세요"):
 
         run_config = RunConfig(streaming_mode=StreamingMode.SSE)
         thinking_status = st.status("응답 생성 중...", expanded=False)
+        tool_container = st.container()
+        text_container = st.container()
 
         for event in runner.run(
             user_id=USER_ID,
@@ -181,7 +226,8 @@ if prompt := st.chat_input("메시지를 입력하세요"):
                         "response": response_data,
                     }
                     tool_interactions.append(tool_data)
-                    render_tool(tool_data)
+                    with tool_container:
+                        render_tool(tool_data)
                     pending_call = None
 
                 elif part.text and not getattr(part, "thought", False) and is_partial:
@@ -194,7 +240,7 @@ if prompt := st.chat_input("메시지를 입력하세요"):
                         thinking_md = None
                     text_content += part.text
                     if text_el is None:
-                        text_el = st.empty()
+                        text_el = text_container.empty()
                     text_el.markdown(text_content)
 
         if thinking_status is not None:
