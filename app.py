@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from collections import deque
 from pathlib import Path
 
 import streamlit as st
@@ -69,16 +70,25 @@ def render_tool(tool: dict):
 
 
 def render_assistant_message(msg: dict):
-    """히스토리 재생용: assistant 메시지를 렌더링합니다."""
-    if msg.get("thinking"):
-        with st.expander("💭 사고 과정"):
-            st.markdown(msg["thinking"])
-
-    for tool in msg.get("tool_interactions", []):
-        render_tool(tool)
-
-    if msg.get("content"):
-        st.markdown(msg["content"])
+    """히스토리 재생용: assistant 메시지를 시간순으로 렌더링합니다."""
+    if "parts" in msg:
+        for part in msg["parts"]:
+            if part["type"] == "thinking":
+                with st.status("💭 사고 과정", state="complete"):
+                    st.markdown(part["text"])
+            elif part["type"] == "tool":
+                render_tool(part)
+            elif part["type"] == "text":
+                st.markdown(part["text"])
+    else:
+        # 이전 포맷 호환
+        if msg.get("thinking"):
+            with st.status("💭 사고 과정", state="complete"):
+                st.markdown(msg["thinking"])
+        for tool in msg.get("tool_interactions", []):
+            render_tool(tool)
+        if msg.get("content"):
+            st.markdown(msg["content"])
 
 
 # --- 페이지 설정 ---
@@ -170,17 +180,15 @@ if prompt:
             parts=[types.Part(text=prompt)],
         )
 
-        thinking_text = ""
+        parts = []
+        thinking_status = None
         thinking_md = None
-        text_content = ""
+        thinking_text = ""
         text_el = None
-        pending_call = None
-        tool_interactions = []
+        text_content = ""
+        pending_calls = deque()
 
         run_config = RunConfig(streaming_mode=StreamingMode.SSE)
-        thinking_status = st.status("응답 생성 중...", expanded=False)
-        tool_container = st.container()
-        text_container = st.container()
 
         for event in runner.run(
             user_id=USER_ID,
@@ -195,65 +203,82 @@ if prompt:
 
             for part in event.content.parts:
                 if getattr(part, "thought", False) and part.text and is_partial:
-                    # --- Thinking 스트리밍 (partial 이벤트) ---
+                    # --- Thinking 스트리밍 ---
+                    if text_el is not None:
+                        parts.append({"type": "text", "text": text_content})
+                        text_el = None
+                        text_content = ""
                     if thinking_md is None:
-                        if thinking_status is None:
-                            thinking_status = st.status("사고 중...", expanded=True)
+                        thinking_status = st.status("사고 중...", expanded=True)
                         thinking_md = thinking_status.empty()
-                    thinking_status.update(label="사고 중...", expanded=True)
+                        thinking_text = ""
                     thinking_text += part.text
                     thinking_md.markdown(thinking_text)
 
                 elif part.function_call and not is_partial:
-                    # --- 툴 호출 (aggregated 이벤트) ---
-                    if thinking_status is not None:
-                        thinking_status.update(label="💭 사고 과정", expanded=False)
-                    pending_call = part.function_call
-
-                elif part.function_response and not is_partial:
-                    # --- 툴 응답 (aggregated 이벤트) ---
-                    fr = part.function_response
-                    call_name = pending_call.name if pending_call else fr.name
-                    call_args = (
-                        dict(pending_call.args)
-                        if pending_call and pending_call.args
-                        else {}
-                    )
-                    response_data = dict(fr.response) if fr.response else {}
-                    tool_data = {
-                        "name": call_name,
-                        "args": call_args,
-                        "response": response_data,
-                    }
-                    tool_interactions.append(tool_data)
-                    with tool_container:
-                        render_tool(tool_data)
-                    pending_call = None
-
-                elif part.text and not getattr(part, "thought", False) and is_partial:
-                    # --- 응답 텍스트 스트리밍 (partial 이벤트) ---
+                    # --- 툴 호출 ---
                     if thinking_status is not None:
                         thinking_status.update(
                             label="💭 사고 과정", state="complete", expanded=False
                         )
+                        if thinking_text:
+                            parts.append({"type": "thinking", "text": thinking_text})
                         thinking_status = None
                         thinking_md = None
-                    text_content += part.text
+                        thinking_text = ""
+                    if text_el is not None:
+                        parts.append({"type": "text", "text": text_content})
+                        text_el = None
+                        text_content = ""
+                    pending_calls.append(part.function_call)
+
+                elif part.function_response and not is_partial:
+                    # --- 툴 응답 ---
+                    fr = part.function_response
+                    matched_call = (
+                        pending_calls.popleft() if pending_calls else None
+                    )
+                    call_name = matched_call.name if matched_call else fr.name
+                    call_args = (
+                        dict(matched_call.args)
+                        if matched_call and matched_call.args
+                        else {}
+                    )
+                    response_data = dict(fr.response) if fr.response else {}
+                    tool_data = {
+                        "type": "tool",
+                        "name": call_name,
+                        "args": call_args,
+                        "response": response_data,
+                    }
+                    parts.append(tool_data)
+                    render_tool(tool_data)
+
+                elif part.text and not getattr(part, "thought", False) and is_partial:
+                    # --- 응답 텍스트 스트리밍 ---
+                    if thinking_status is not None:
+                        thinking_status.update(
+                            label="💭 사고 과정", state="complete", expanded=False
+                        )
+                        if thinking_text:
+                            parts.append({"type": "thinking", "text": thinking_text})
+                        thinking_status = None
+                        thinking_md = None
+                        thinking_text = ""
                     if text_el is None:
-                        text_el = text_container.empty()
+                        text_el = st.empty()
+                    text_content += part.text
                     text_el.markdown(text_content)
 
+        # --- 루프 종료: 미완료 페이즈 정리 ---
         if thinking_status is not None:
             thinking_status.update(
                 label="💭 사고 과정", state="complete", expanded=False
             )
+            if thinking_text:
+                parts.append({"type": "thinking", "text": thinking_text})
+        if text_content:
+            parts.append({"type": "text", "text": text_content})
 
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": text_content,
-            "thinking": thinking_text,
-            "tool_interactions": tool_interactions,
-        }
-    )
+    st.session_state.messages.append({"role": "assistant", "parts": parts})
     st.rerun()
