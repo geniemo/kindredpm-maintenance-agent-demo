@@ -50,6 +50,12 @@ def init_db():
     """
     )
 
+    _seed_slots(conn)
+    conn.close()
+
+
+def _seed_slots(conn):
+    """오늘 기준 향후 7일치 슬롯을 생성합니다. 이미 존재하는 슬롯은 건드리지 않습니다."""
     today = date.today()
     for day_offset in range(1, 8):
         d = (today + timedelta(days=day_offset)).isoformat()
@@ -58,14 +64,13 @@ def init_db():
                 "INSERT OR IGNORE INTO available_slots (date, time_slot, is_available) VALUES (?, ?, 1)",
                 (d, slot),
             )
-
     conn.commit()
-    conn.close()
 
 
 def get_available_slots(target_date: str) -> list[str]:
     """특정 날짜의 빈 시간대 목록을 반환합니다."""
     conn = get_connection()
+    _seed_slots(conn)
     cursor = conn.execute(
         "SELECT time_slot FROM available_slots WHERE date = ? AND is_available = 1 ORDER BY time_slot",
         (target_date,),
