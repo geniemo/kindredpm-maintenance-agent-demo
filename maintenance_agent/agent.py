@@ -1,6 +1,7 @@
 from datetime import date
 
 from google.adk.agents.llm_agent import Agent
+from google.genai import types
 
 from .tools import (
     cancel_repair,
@@ -306,4 +307,7 @@ root_agent = Agent(
         check_repair_status,
         cancel_repair,
     ],
+    generate_content_config=types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(include_thoughts=True),
+    ),
 )
