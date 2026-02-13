@@ -199,9 +199,8 @@ if prompt:
                     if thinking_md is None:
                         if thinking_status is None:
                             thinking_status = st.status("사고 중...", expanded=True)
-                        else:
-                            thinking_status.update(label="사고 중...", expanded=True)
                         thinking_md = thinking_status.empty()
+                    thinking_status.update(label="사고 중...", expanded=True)
                     thinking_text += part.text
                     thinking_md.markdown(thinking_text)
 
@@ -209,7 +208,6 @@ if prompt:
                     # --- 툴 호출 (aggregated 이벤트) ---
                     if thinking_status is not None:
                         thinking_status.update(label="💭 사고 과정", expanded=False)
-                        thinking_md = None
                     pending_call = part.function_call
 
                 elif part.function_response and not is_partial:
@@ -258,3 +256,4 @@ if prompt:
             "tool_interactions": tool_interactions,
         }
     )
+    st.rerun()
