@@ -131,8 +131,13 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
+# --- 사용자 입력 수신 (welcome 렌더링 전에 읽어야 조건 판단 가능) ---
+prompt = st.chat_input("메시지를 입력하세요") or st.session_state.pop(
+    "pending_prompt", None
+)
+
 # --- 초기 안내 메시지 ---
-if not st.session_state.messages:
+if not st.session_state.messages and not prompt:
     st.markdown(
         "안녕하세요! **KindredPM 유지보수 비서**입니다.\n\n"
         "시설 문제 신고, 응급조치 안내, 수리 예약까지 도와드립니다.\n"
@@ -152,9 +157,6 @@ if not st.session_state.messages:
             st.rerun()
 
 # --- 사용자 입력 처리 (스트리밍) ---
-prompt = st.chat_input("메시지를 입력하세요") or st.session_state.pop(
-    "pending_prompt", None
-)
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
 
