@@ -195,7 +195,10 @@ if prompt:
                 if getattr(part, "thought", False) and part.text and is_partial:
                     # --- Thinking 스트리밍 (partial 이벤트) ---
                     if thinking_md is None:
-                        thinking_status.update(label="사고 중...", expanded=True)
+                        if thinking_status is None:
+                            thinking_status = st.status("사고 중...", expanded=True)
+                        else:
+                            thinking_status.update(label="사고 중...", expanded=True)
                         thinking_md = thinking_status.empty()
                     thinking_text += part.text
                     thinking_md.markdown(thinking_text)
@@ -203,10 +206,7 @@ if prompt:
                 elif part.function_call and not is_partial:
                     # --- 툴 호출 (aggregated 이벤트) ---
                     if thinking_status is not None:
-                        thinking_status.update(
-                            label="💭 사고 과정", state="complete", expanded=False
-                        )
-                        thinking_status = None
+                        thinking_status.update(label="💭 사고 과정", expanded=False)
                         thinking_md = None
                     pending_call = part.function_call
 
