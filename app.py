@@ -19,6 +19,7 @@ if "GOOGLE_API_KEY" not in os.environ:
     load_dotenv(Path(__file__).parent / "maintenance_agent" / ".env")
 
 # --- Agent / Runner 초기화 (import 전에 환경 변수 설정 필요) ---
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -40,56 +41,6 @@ def get_runner():
     )
 
 
-def run_agent(session_id: str, user_message: str) -> dict:
-    """에이전트에 메시지를 보내고 응답을 파싱하여 반환합니다."""
-    runner = get_runner()
-    content = types.Content(
-        role="user",
-        parts=[types.Part(text=user_message)],
-    )
-
-    thinking_parts: list[str] = []
-    text_parts: list[str] = []
-    all_function_calls: list = []
-    all_function_responses: list = []
-
-    for event in runner.run(
-        user_id=USER_ID,
-        session_id=session_id,
-        new_message=content,
-    ):
-        if not event.content or not event.content.parts:
-            continue
-
-        for part in event.content.parts:
-            if part.function_call:
-                all_function_calls.append(part.function_call)
-            elif part.function_response:
-                all_function_responses.append(part.function_response)
-            elif part.text and not event.partial:
-                if getattr(part, "thought", False):
-                    thinking_parts.append(part.text)
-                else:
-                    text_parts.append(part.text)
-
-    # function_call과 function_response를 순서대로 매칭
-    tool_interactions = []
-    for fc, fr in zip(all_function_calls, all_function_responses):
-        tool_interactions.append(
-            {
-                "name": fc.name,
-                "args": dict(fc.args) if fc.args else {},
-                "response": dict(fr.response) if fr and fr.response else {},
-            }
-        )
-
-    return {
-        "content": "".join(text_parts),
-        "thinking": "\n".join(thinking_parts),
-        "tool_interactions": tool_interactions,
-    }
-
-
 def reset_database():
     """DB와 에이전트 세션을 초기화합니다."""
     if DB_PATH.exists():
@@ -100,26 +51,31 @@ def reset_database():
     st.session_state.session_id = str(uuid.uuid4())
 
 
+def render_tool(tool: dict):
+    """툴 호출/응답을 st.status로 렌더링합니다."""
+    with st.status(f"🔧 {tool['name']}", state="complete"):
+        if tool["args"]:
+            st.code(
+                json.dumps(tool["args"], ensure_ascii=False, indent=2),
+                language="json",
+            )
+        if tool["response"]:
+            st.divider()
+            st.caption("결과")
+            st.code(
+                json.dumps(tool["response"], ensure_ascii=False, indent=2),
+                language="json",
+            )
+
+
 def render_assistant_message(msg: dict):
-    """assistant 메시지의 thinking, 툴 호출, 텍스트를 렌더링합니다."""
+    """히스토리 재생용: assistant 메시지를 렌더링합니다."""
     if msg.get("thinking"):
-        with st.expander("사고 과정", icon="💭"):
+        with st.expander("💭 사고 과정"):
             st.markdown(msg["thinking"])
 
     for tool in msg.get("tool_interactions", []):
-        with st.status(f"🔧 {tool['name']}", state="complete"):
-            if tool["args"]:
-                st.code(
-                    json.dumps(tool["args"], ensure_ascii=False, indent=2),
-                    language="json",
-                )
-            if tool["response"]:
-                st.divider()
-                st.caption("결과")
-                st.code(
-                    json.dumps(tool["response"], ensure_ascii=False, indent=2),
-                    language="json",
-                )
+        render_tool(tool)
 
     if msg.get("content"):
         st.markdown(msg["content"])
@@ -155,7 +111,7 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-# --- 사용자 입력 처리 ---
+# --- 사용자 입력 처리 (스트리밍) ---
 if prompt := st.chat_input("메시지를 입력하세요"):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
@@ -163,16 +119,94 @@ if prompt := st.chat_input("메시지를 입력하세요"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("답변을 생성 중입니다..."):
-            response = run_agent(st.session_state.session_id, prompt)
+        runner = get_runner()
+        content = types.Content(
+            role="user",
+            parts=[types.Part(text=prompt)],
+        )
 
-        render_assistant_message(response)
+        thinking_text = ""
+        thinking_md = None
+        text_content = ""
+        text_el = None
+        pending_call = None
+        tool_interactions = []
+
+        run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+        thinking_status = st.status("응답 생성 중...", expanded=False)
+
+        for event in runner.run(
+            user_id=USER_ID,
+            session_id=st.session_state.session_id,
+            new_message=content,
+            run_config=run_config,
+        ):
+            if not event.content or not event.content.parts:
+                continue
+
+            is_partial = getattr(event, "partial", False)
+
+            for part in event.content.parts:
+                if getattr(part, "thought", False) and part.text and is_partial:
+                    # --- Thinking 스트리밍 (partial 이벤트) ---
+                    if thinking_md is None:
+                        thinking_status.update(label="사고 중...", expanded=True)
+                        thinking_md = thinking_status.empty()
+                    thinking_text += part.text
+                    thinking_md.markdown(thinking_text)
+
+                elif part.function_call and not is_partial:
+                    # --- 툴 호출 (aggregated 이벤트) ---
+                    if thinking_status is not None:
+                        thinking_status.update(
+                            label="💭 사고 과정", state="complete", expanded=False
+                        )
+                        thinking_status = None
+                        thinking_md = None
+                    pending_call = part.function_call
+
+                elif part.function_response and not is_partial:
+                    # --- 툴 응답 (aggregated 이벤트) ---
+                    fr = part.function_response
+                    call_name = pending_call.name if pending_call else fr.name
+                    call_args = (
+                        dict(pending_call.args)
+                        if pending_call and pending_call.args
+                        else {}
+                    )
+                    response_data = dict(fr.response) if fr.response else {}
+                    tool_data = {
+                        "name": call_name,
+                        "args": call_args,
+                        "response": response_data,
+                    }
+                    tool_interactions.append(tool_data)
+                    render_tool(tool_data)
+                    pending_call = None
+
+                elif part.text and not getattr(part, "thought", False) and is_partial:
+                    # --- 응답 텍스트 스트리밍 (partial 이벤트) ---
+                    if thinking_status is not None:
+                        thinking_status.update(
+                            label="💭 사고 과정", state="complete", expanded=False
+                        )
+                        thinking_status = None
+                        thinking_md = None
+                    text_content += part.text
+                    if text_el is None:
+                        text_el = st.empty()
+                    text_el.markdown(text_content)
+
+        if thinking_status is not None:
+            thinking_status.update(
+                label="💭 사고 과정", state="complete", expanded=False
+            )
 
     st.session_state.messages.append(
         {
             "role": "assistant",
-            "content": response["content"],
-            "thinking": response.get("thinking", ""),
-            "tool_interactions": response.get("tool_interactions", []),
+            "content": text_content,
+            "thinking": thinking_text,
+            "tool_interactions": tool_interactions,
         }
     )
