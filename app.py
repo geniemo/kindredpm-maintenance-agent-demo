@@ -26,7 +26,7 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 from maintenance_agent.agent import root_agent
-from maintenance_agent.db import DB_PATH, init_db
+
 
 APP_NAME = "maintenance_agent"
 USER_ID = "streamlit_user"
@@ -42,12 +42,8 @@ def get_runner():
     )
 
 
-def reset_database():
-    """DB와 에이전트 세션을 초기화합니다."""
-    if DB_PATH.exists():
-        DB_PATH.unlink()
-    init_db()
-    get_runner.clear()
+def reset_conversation():
+    """채팅 히스토리와 에이전트 세션을 초기화합니다. DB는 유지합니다."""
     st.session_state.messages = []
     st.session_state.session_id = str(uuid.uuid4())
 
@@ -124,7 +120,7 @@ with st.sidebar:
 
     st.divider()
     if st.button("대화 초기화", use_container_width=True):
-        reset_database()
+        reset_conversation()
         st.rerun()
 
 # --- 세션 상태 초기화 ---
@@ -235,9 +231,7 @@ if prompt:
                 elif part.function_response and not is_partial:
                     # --- 툴 응답 ---
                     fr = part.function_response
-                    matched_call = (
-                        pending_calls.popleft() if pending_calls else None
-                    )
+                    matched_call = pending_calls.popleft() if pending_calls else None
                     call_name = matched_call.name if matched_call else fr.name
                     call_args = (
                         dict(matched_call.args)
