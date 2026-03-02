@@ -1,6 +1,7 @@
 import os
 import smtplib
 from email.mime.text import MIMEText
+from typing import Literal
 
 from .db import (
     book_slot,
@@ -13,6 +14,10 @@ from .db import (
 )
 
 init_db()
+
+IssueType = Literal[
+    "sink_leak", "toilet_clog", "boiler_issue", "door_lock_issue", "mold_issue", "other"
+]
 
 QUICK_FIX_DATA = {
     "sink_leak": (
@@ -51,17 +56,20 @@ QUICK_FIX_DATA = {
 }
 
 
-def provide_quick_fix(issue_type: str) -> dict:
+def provide_quick_fix(issue_type: IssueType) -> dict:
     """응급조치 방법을 안내합니다. issue_type에 해당하는 응급조치 절차를 반환합니다."""
     if issue_type in QUICK_FIX_DATA:
         return {
             "instructions": QUICK_FIX_DATA[issue_type],
             "guide": "위 응급조치를 모든 단계 빠짐없이 번호 목록으로 안내하세요.",
         }
-    return {"error": f"지원하지 않는 문제 유형입니다: {issue_type}"}
+    return {
+        "error": f"지원하지 않는 문제 유형입니다: {issue_type}",
+        "guide": "기타 유형은 응급조치 없이 바로 예약 정보 수집(A-4)으로 진행하세요.",
+    }
 
 
-def check_available_slots(date: str, issue_type: str) -> dict:
+def check_available_slots(date: str, issue_type: IssueType) -> dict:
     """특정 날짜의 예약 가능한 시간대를 조회합니다."""
     slots = get_available_slots(date)
     if not slots:
@@ -78,7 +86,7 @@ def schedule_repair(
     address: str,
     date: str,
     time_slot: str,
-    issue_type: str,
+    issue_type: IssueType,
     issue_description: str,
     email: str,
 ) -> dict:
@@ -131,6 +139,7 @@ ISSUE_TYPE_KR = {
     "boiler_issue": "보일러 고장",
     "door_lock_issue": "도어록 고장",
     "mold_issue": "곰팡이/결로",
+    "other": "기타",
 }
 
 
